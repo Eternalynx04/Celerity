@@ -1,0 +1,31 @@
+name: Phase 1 checks
+on: [push, pull_request]
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: celerity
+          POSTGRES_PASSWORD: celerity_dev_only
+          POSTGRES_DB: celerity
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U celerity -d celerity"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      CELERITY_TEST_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@127.0.0.1:5432/celerity
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+

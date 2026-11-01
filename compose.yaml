@@ -1,0 +1,75 @@
+name: celerity
+
+x-lab: &lab
+  build: .
+  image: celerity-lab:phase1
+  environment: &lab-env
+    CELERITY_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@db:5432/celerity
+    CELERITY_SHIPPING_URL: http://shipping:8001
+    CELERITY_ENABLE_N_PLUS_ONE: ${CELERITY_ENABLE_N_PLUS_ONE:-false}
+    CELERITY_ENABLE_MISSING_INDEX: ${CELERITY_ENABLE_MISSING_INDEX:-false}
+    CELERITY_ENABLE_REDUNDANT_SHIPPING: ${CELERITY_ENABLE_REDUNDANT_SHIPPING:-false}
+    CELERITY_SHIPPING_DELAY_MS: ${CELERITY_SHIPPING_DELAY_MS:-40}
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: celerity
+      POSTGRES_PASSWORD: celerity_dev_only
+      POSTGRES_DB: celerity
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U celerity -d celerity"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  db-init:
+    <<: *lab
+    command: ["python", "-m", "celerity.cli", "init-db"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  shipping:
+    <<: *lab
+    command: ["uvicorn", "celerity.shipping_stub:app", "--host", "0.0.0.0", "--port", "8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    <<: *lab
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      shipping:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  test:
+    <<: *lab
+    profiles: ["test"]
+    environment:
+      <<: *lab-env
+      CELERITY_TEST_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@db:5432/celerity
+    command: ["pytest", "-q"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+
