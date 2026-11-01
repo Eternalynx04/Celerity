@@ -1,4 +1,4 @@
-name: Phase 1 checks
+name: Celerity checks
 on: [push, pull_request]
 jobs:
   tests:
@@ -16,6 +16,7 @@ jobs:
           --health-interval 2s --health-timeout 3s --health-retries 20
     env:
       CELERITY_TEST_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@127.0.0.1:5432/celerity
+      CELERITY_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@127.0.0.1:5432/celerity
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,4 +29,6 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q
+      - name: Benchmark pipeline smoke test
+        run: python scripts/benchmark.py --workload catalogue --duration 2 --warmup 1 --users 2 --repeats 1
 

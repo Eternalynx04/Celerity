@@ -6,9 +6,68 @@ Find bottlenecks. Test fixes. Verify improvements.
 
 Celerity will use a supervisor, investigator, and optimizer to diagnose backend
 performance problems and validate changes with real experiments. This repository
-currently implements **Phase 1: the target application**, not the future agents.
+currently implements **Phase 2: measurement and tracing**, on top of the Phase 1
+shopping application. The investigator agent starts in Phase 3.
 
-## What works in Phase 1
+## New in Phase 2
+
+- Read-only Locust workloads for catalogue, order history, and shipping.
+- A benchmark runner with warm-up exclusion, repeated matched trials, randomized
+  pair ordering, isolated PostgreSQL data, and graceful process cleanup.
+- CSV request samples, per-trial JSON, and human-readable comparison reports.
+- OpenTelemetry request, SQL, and shipping spans with W3C cross-service propagation.
+- Per-request query counts, shipping counts, timing headers, and trace IDs.
+- Local JSONL trace evidence, plus optional OTLP export to Jaeger v2.
+- A Windows-native Jaeger helper with published binary-checksum verification.
+
+### Run a benchmark
+
+From the project folder with PostgreSQL available:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark.py --workload catalogue
+```
+
+Defaults: five users, five-second warm-up, twenty-second measurement, three repeats
+of healthy versus faulty. To measure all three workloads:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark.py --workload all
+```
+
+Results appear under `var/benchmarks/<suite-id>/report.md` and `results.json`.
+Each trial includes `samples.csv`, `summary.json`, Locust output, and JSONL traces.
+Benchmarks use ports 8020/8021 and a temporary schema; they do not stop the normal
+8000/8001 lab or change its business data/index. The temporary schema is removed
+afterward. A full data fingerprint checks that benchmark traffic remained read-only.
+The code/dependency fingerprint also must remain unchanged during a suite.
+
+Our explicit-window CSV/JSON is authoritative. Locust's secondary CSV can include
+requests crossing a window boundary. A fast but incorrect response is counted as
+a failure, and invalid trials cannot become successful comparisons.
+
+### Open the trace viewer
+
+```powershell
+.\.venv\Scripts\python.exe scripts/jaeger.py start
+.\scripts\start.ps1 -Scenario healthy -Jaeger
+```
+
+Stop an already-running lab first with `scripts/stop.ps1`. Open
+<http://127.0.0.1:16686>, make an API request, and search service `celerity-api`.
+Shipping traces include both `celerity-api` and `celerity-shipping` in one trace.
+Use `/lab/telemetry` to see exporter information. Trace files are also written to
+`var/traces/` even when Jaeger is not configured.
+
+Jaeger uses bounded in-memory storage, so its UI resets when it stops. JSONL files
+remain on disk. The benchmark defaults to JSONL only; add
+`--otlp-endpoint http://127.0.0.1:4318/v1/traces` to export its traces to Jaeger too.
+Full sampling is fixed in both benchmark variants; tracing overhead is part of
+these lab measurements, not an estimate of uninstrumented production performance.
+
+Read `docs/PHASE_2_EXPLAINED.md` for the plain-language walkthrough and protocol.
+
+## Phase 1 foundation
 
 - A FastAPI shopping API backed by real PostgreSQL.
 - Products with images, customers, order history, checkout quotes, and order creation.
@@ -91,6 +150,10 @@ docker compose up --build -d
 docker compose run --rm test
 ```
 
+For Jaeger, set `CELERITY_OTLP_ENDPOINT=http://jaeger:4318/v1/traces` in `.env`
+and start `docker compose --profile observability up --build -d`.
+Traces use the `trace_data` named volume; Jaeger's in-memory UI resets on restart.
+
 Compose waits for PostgreSQL, runs the database initializer, waits for shipping,
 and then starts the API. Database and API host ports are bound to loopback.
 Stop the native launcher/PostgreSQL first if they occupy 8000 or 55432.
@@ -113,6 +176,7 @@ are disposable examples, not production credentials.
 | --- | --- | --- |
 | GET | `/health` | Check the API's database connection |
 | GET | `/lab/scenario` | Show fault settings and index presence |
+| GET | `/lab/telemetry` | Show tracing configuration and exporter information |
 | GET | `/api/products?limit=20&offset=0` | List products and their images |
 | GET | `/api/products/{id}` | Read one product |
 | GET | `/api/customers` | List synthetic customers |
@@ -186,8 +250,9 @@ tables, files, faults, tests, and exercises in plain language.
 ## Current scope
 
 This is a local synthetic lab with no authentication, real payment processing,
-agent execution, performance dashboard, or telemetry backend yet. Keep it on
-localhost. Phase 2 adds load testing/tracing; Phase 3 adds the first agent.
+agent execution, or Celerity product dashboard yet. Keep it on localhost.
+Phase 2 includes measurement tools and optional Jaeger; Phase 3 adds the first agent.
+The Synapse visual direction is selected for the later Celerity frontend.
 Order submission is not idempotent: submitting the same valid body twice creates
 two orders. Preventing overselling is a separate property covered by row locks.
 

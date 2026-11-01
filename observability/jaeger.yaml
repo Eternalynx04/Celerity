@@ -1,0 +1,46 @@
+# Local Jaeger v2, with bounded in-memory storage. Traces disappear on restart.
+extensions:
+  jaeger_storage:
+    backends:
+      local:
+        memory:
+          max_traces: 10000
+  jaeger_query:
+    storage:
+      traces: local
+    http:
+      endpoint: "${env:JAEGER_LISTEN_HOST:-127.0.0.1}:16686"
+    grpc:
+      endpoint: "${env:JAEGER_LISTEN_HOST:-127.0.0.1}:16685"
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: "${env:JAEGER_LISTEN_HOST:-127.0.0.1}:13133"
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: "${env:JAEGER_LISTEN_HOST:-127.0.0.1}:4318"
+      grpc:
+        endpoint: "${env:JAEGER_LISTEN_HOST:-127.0.0.1}:4317"
+
+processors:
+  batch:
+    timeout: 200ms
+    send_batch_size: 256
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: local
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    metrics:
+      level: none

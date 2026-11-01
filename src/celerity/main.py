@@ -23,6 +23,7 @@ from celerity.schemas import (
     Zone,
 )
 from celerity.shipping import ShippingGateway, ShippingUnavailable
+from celerity.telemetry import ObservationMiddleware, TelemetryRuntime
 
 
 def customer_orders_query(customer_id: int, limit: int = 20):
@@ -49,6 +50,7 @@ def create_app(
     *,
     engine: Engine | None = None,
     shipping_client: httpx.Client | None = None,
+    telemetry: TelemetryRuntime | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     owns_engine = engine is None
@@ -61,12 +63,21 @@ def create_app(
         else httpx.Client(base_url=settings.shipping_url, timeout=3.0, trust_env=False)
     )
     shipping = ShippingGateway(client)
+    owns_telemetry = telemetry is None
+    runtime = telemetry
+    if runtime is None and settings.telemetry_enabled:
+        runtime = TelemetryRuntime(settings, "celerity-api")
+    detach_sql = runtime.observe_engine(engine) if runtime is not None else None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         try:
             yield
         finally:
+            if detach_sql is not None:
+                detach_sql()
+            if runtime is not None and owns_telemetry:
+                runtime.shutdown()
             if owns_client:
                 client.close()
             if owns_engine:
@@ -75,14 +86,17 @@ def create_app(
     application = FastAPI(
         title="Celerity Shopping Lab",
         description=(
-            "Phase 1 target application for Celerity's agentic performance engineer. "
+            "Phase 2 instrumented target for Celerity's agentic performance engineer. "
             "Synthetic local data; intentionally switchable performance faults."
         ),
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
     application.state.engine = engine
     application.state.settings = settings
+    application.state.telemetry = runtime
+    if runtime is not None:
+        application.add_middleware(ObservationMiddleware, runtime=runtime)
 
     def get_session() -> Iterator[Session]:
         with sessions() as session:
@@ -94,7 +108,11 @@ def create_app(
 
     @application.get("/", tags=["Lab"])
     def root() -> dict[str, str | int]:
-        return {"project": "Celerity", "phase": 1, "docs": "/docs", "scenario": "/lab/scenario"}
+        return {"project": "Celerity", "phase": 2, "docs": "/docs", "scenario": "/lab/scenario"}
+
+    @application.get("/lab/telemetry", tags=["Lab"])
+    def telemetry_info() -> dict:
+        return runtime.describe() if runtime is not None else {"enabled": False}
 
     @application.get("/health", tags=["Lab"])
     def health() -> dict[str, str]:

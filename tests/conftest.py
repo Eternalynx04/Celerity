@@ -57,6 +57,7 @@ def client_factory(engine):
         )
         settings = Settings(
             _env_file=None,
+            telemetry_enabled=False,
             enable_n_plus_one=n_plus_one,
             enable_missing_index=False,
             enable_redundant_shipping=redundant_shipping,

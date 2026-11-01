@@ -42,6 +42,7 @@ def wait_for_service(url: str, process: subprocess.Popen) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=SCENARIOS, default="healthy")
+    parser.add_argument("--jaeger", action="store_true", help="Also export traces to local Jaeger")
     parser.add_argument("--stop", action="store_true", help="Stop only the recorded local launcher")
     args = parser.parse_args()
     os.chdir(ROOT)
@@ -66,6 +67,8 @@ def main() -> None:
             )
     flags = SCENARIOS[args.scenario]
     environment = os.environ.copy()
+    if args.jaeger:
+        environment["CELERITY_OTLP_ENDPOINT"] = "http://127.0.0.1:4318/v1/traces"
     for name, value in zip(
         ("N_PLUS_ONE", "MISSING_INDEX", "REDUNDANT_SHIPPING"), flags, strict=True
     ):
@@ -76,6 +79,7 @@ def main() -> None:
     stop_file = ROOT / "var" / "stop-local"
     stop_file.unlink(missing_ok=True)
     children: list[subprocess.Popen] = []
+    child_stops: list[Path] = []
     handles = []
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -85,23 +89,26 @@ def main() -> None:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
     try:
-        for name, module, port, extra in (
-            ("shipping", "celerity.shipping_stub:app", 8001, []),
-            ("api", "celerity.main:create_app", 8000, ["--factory"]),
+        for name, port in (
+            ("shipping", 8001),
+            ("api", 8000),
         ):
+            child_stop = ROOT / "var" / f"stop-{name}"
+            child_stop.unlink(missing_ok=True)
+            child_stops.append(child_stop)
             handle = (logs / f"{name}.log").open("w", encoding="utf-8")
             handles.append(handle)
             child = subprocess.Popen(
                 [
                     sys.executable,
                     "-m",
-                    "uvicorn",
-                    module,
-                    "--host",
-                    "127.0.0.1",
+                    "celerity.serve",
+                    "--service",
+                    name,
                     "--port",
                     str(port),
-                    *extra,
+                    "--stop-file",
+                    str(child_stop),
                 ],
                 cwd=ROOT,
                 env=environment,
@@ -130,14 +137,17 @@ def main() -> None:
                 raise RuntimeError("A service stopped unexpectedly; inspect var/logs.")
             time.sleep(0.2)
     finally:
+        for child_stop in child_stops:
+            child_stop.write_text("stop", encoding="utf-8")
         for child in reversed(children):
             if child.poll() is None:
-                child.terminate()
                 try:
-                    child.wait(timeout=5)
+                    child.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     child.kill()
                     child.wait()
+        for child_stop in child_stops:
+            child_stop.unlink(missing_ok=True)
         for handle in handles:
             handle.close()
         state_path.unlink(missing_ok=True)

@@ -2,7 +2,7 @@ name: celerity
 
 x-lab: &lab
   build: .
-  image: celerity-lab:phase1
+  image: celerity-lab:phase2
   environment: &lab-env
     CELERITY_DATABASE_URL: postgresql+psycopg://celerity:celerity_dev_only@db:5432/celerity
     CELERITY_SHIPPING_URL: http://shipping:8001
@@ -10,6 +10,12 @@ x-lab: &lab
     CELERITY_ENABLE_MISSING_INDEX: ${CELERITY_ENABLE_MISSING_INDEX:-false}
     CELERITY_ENABLE_REDUNDANT_SHIPPING: ${CELERITY_ENABLE_REDUNDANT_SHIPPING:-false}
     CELERITY_SHIPPING_DELAY_MS: ${CELERITY_SHIPPING_DELAY_MS:-40}
+    CELERITY_TELEMETRY_ENABLED: ${CELERITY_TELEMETRY_ENABLED:-true}
+    CELERITY_TELEMETRY_DIR: /app/var/traces
+    CELERITY_TELEMETRY_SAMPLE_RATIO: ${CELERITY_TELEMETRY_SAMPLE_RATIO:-1.0}
+    CELERITY_OTLP_ENDPOINT: ${CELERITY_OTLP_ENDPOINT:-}
+  volumes:
+    - trace_data:/app/var/traces
 
 services:
   db:
@@ -37,7 +43,7 @@ services:
 
   shipping:
     <<: *lab
-    command: ["uvicorn", "celerity.shipping_stub:app", "--host", "0.0.0.0", "--port", "8001"]
+    command: ["uvicorn", "celerity.shipping_stub:create_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
       interval: 2s
@@ -70,6 +76,19 @@ services:
       db:
         condition: service_healthy
 
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    profiles: ["observability"]
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    volumes:
+      - ./observability/jaeger.yaml:/etc/jaeger/config.yaml:ro
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+
 volumes:
   postgres_data:
+  trace_data:
 

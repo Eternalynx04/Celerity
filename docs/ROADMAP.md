@@ -10,7 +10,8 @@
 | 6: Interface | Live investigation dashboard and report | A user can complete a workflow without terminal operations |
 | 7: Evaluation | Unseen scenarios, baselines, CI, demo, documentation | Measured success, regressions, cost, and limitations |
 
-Phase 1 builds only the target environment. The future investigation store and
+Phases 1 and 2 provide the target environment, tracing, and repeatable experiments.
+The future investigation store and
 agent state will be separate from the shopping application's business data.
 
 Development proceeds phase by phase. GitHub publication happens when requested.

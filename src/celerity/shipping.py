@@ -4,6 +4,7 @@ import httpx
 from pydantic import ValidationError
 
 from celerity.schemas import QuoteOut, Zone
+from celerity.telemetry import shipping_request
 
 
 class ShippingUnavailable(Exception):
@@ -18,11 +19,12 @@ class ShippingGateway:
         try:
             result: QuoteOut | None = None
             for _ in range(calls):
-                response = self.client.get("/quote", params={"zone": zone})
-                response.raise_for_status()
-                result = QuoteOut.model_validate(response.json())
-                if result.zone != zone:
-                    raise ShippingUnavailable("Shipping service returned a mismatched zone.")
+                with shipping_request(zone) as headers:
+                    response = self.client.get("/quote", params={"zone": zone}, headers=headers)
+                    response.raise_for_status()
+                    result = QuoteOut.model_validate(response.json())
+                    if result.zone != zone:
+                        raise ShippingUnavailable("Shipping service returned a mismatched zone.")
             if result is None:
                 raise ShippingUnavailable("No shipping quote was requested.")
             return result
